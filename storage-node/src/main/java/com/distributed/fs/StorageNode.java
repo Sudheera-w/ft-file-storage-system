@@ -6,7 +6,7 @@ public class StorageNode {
 
     public StorageNode(String nodeId, String storagePath) {
         this.nodeId = nodeId;
-        this.storage = new FileStorage(storagePath);
+        this.storage = new FileStorage(nodeId, storagePath); // FIXED
     }
 
     public void start(String metadataHost) {
