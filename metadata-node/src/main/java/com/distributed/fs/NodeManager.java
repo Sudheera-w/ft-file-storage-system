@@ -1,11 +1,14 @@
 package com.distributed.fs;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class NodeManager {
     private final Map<String, NodeInfo> nodes = new ConcurrentHashMap<>();
     private final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
+    private final Set<String> recoveringNodes = ConcurrentHashMap.newKeySet();
     private static final long TIMEOUT_MS = 10000; // 10 seconds
 
     // Register a node
@@ -20,7 +23,8 @@ public class NodeManager {
         NodeInfo node = nodes.get(nodeId);
         if (node != null && !node.isOnline()) {
             node.setOnline(true);
-            System.out.println("[NodeManager] Node " + nodeId + " is BACK ONLINE");
+            recoveringNodes.add(nodeId);
+            System.out.println("[NodeManager] Node " + nodeId + " is BACK ONLINE - Starting recovery process");
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
     }
@@ -29,13 +33,6 @@ public class NodeManager {
     public void markOffline(String nodeId) {
         NodeInfo node = nodes.get(nodeId);
         if (node != null) node.setOnline(false);
-    }
-
-    // Update heartbeat from node
-    public void updateHeartbeat(NodeInfo nodeInfo) {
-        lastSeen.put(nodeInfo.getNodeId(), System.currentTimeMillis());
-        markOnline(nodeInfo.getNodeId());
-        System.out.println("[Heartbeat] Received from " + nodeInfo.getNodeId());
     }
 
     // Check node health periodically
@@ -67,5 +64,16 @@ public class NodeManager {
 
     public Map<String, NodeInfo> getNodes() {
         return nodes;
+    }
+
+    // Get nodes that are currently recovering
+    public Set<String> getRecoveringNodes() {
+        return new HashSet<>(recoveringNodes);
+    }
+
+    // Mark a node as fully recovered
+    public void markRecovered(String nodeId) {
+        recoveringNodes.remove(nodeId);
+        System.out.println("[NodeManager] Node " + nodeId + " recovery completed");
     }
 }

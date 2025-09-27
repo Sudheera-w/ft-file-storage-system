@@ -43,6 +43,9 @@ public class StorageNode {
                     storage.storeFile(fileName, data);
                     System.out.println("Received file: " + fileName + " on node " + nodeId);
 
+                    // Always notify metadata node about the file (whether from client or replication)
+                    notifyMetadataNode(fileName, nodeId);
+
                     // Replicate only if uploaded from client
                     if (fromClient) {
                         replicateToOtherNodes(fileName, data);
@@ -122,6 +125,18 @@ public class StorageNode {
 
         StorageNode node = new StorageNode(nodeId, storagePath, replicationPort);
         node.start(metadataHost);
+    }
+
+    private void notifyMetadataNode(String fileName, String nodeId) {
+        try (Socket socket = new Socket("localhost", Config.METADATA_NODE_PORT);
+             java.io.PrintWriter out = new java.io.PrintWriter(socket.getOutputStream(), true)) {
+
+            out.println(Message.FILE_UPDATE + ":" + fileName + ":" + nodeId);
+            System.out.println("Notified metadata node about file: " + fileName);
+
+        } catch (Exception e) {
+            System.out.println("Failed to notify metadata node: " + e.getMessage());
+        }
     }
 
     private static int getDefaultPort(String nodeId) {

@@ -11,7 +11,7 @@ public class MetadataNode {
         nodeManager.registerNode("Node3", "localhost", 5003);
 
         // Start heartbeat listener
-        new Thread(new HeartbeatService(nodeManager)).start();
+        new Thread(new HeartbeatService(nodeManager, fileManager)).start();
 
         // Start failure detector
         new Thread(new FailureDetector(nodeManager)).start();
