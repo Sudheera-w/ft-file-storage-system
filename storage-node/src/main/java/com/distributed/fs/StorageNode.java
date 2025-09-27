@@ -8,15 +8,11 @@ import java.net.Socket;
 public class StorageNode {
     private final String nodeId;
     private final FileStorage storage;
-    private final FileManager fileManager;
-    private final NodeManager nodeManager;
     private final int replicationPort;
 
-    public StorageNode(String nodeId, String storagePath, FileManager fileManager, NodeManager nodeManager, int replicationPort) {
+    public StorageNode(String nodeId, String storagePath, int replicationPort) {
         this.nodeId = nodeId;
         this.storage = new FileStorage(nodeId, storagePath);
-        this.fileManager = fileManager;
-        this.nodeManager = nodeManager;
         this.replicationPort = replicationPort;
     }
 
@@ -49,7 +45,7 @@ public class StorageNode {
 
                     // Replicate only if uploaded from client
                     if (fromClient) {
-                        fileManager.ensureReplication(fileName, data, nodeId);
+                        replicateToOtherNodes(fileName, data);
                     }
 
                     client.close();
@@ -60,20 +56,80 @@ public class StorageNode {
         }).start();
     }
 
+    private void replicateToOtherNodes(String fileName, byte[] data) {
+        System.out.println("Starting replication of " + fileName + " from " + nodeId);
+
+        // Get list of other nodes to replicate to
+        String[] otherNodes = getOtherNodes();
+
+        for (String targetNode : otherNodes) {
+            try {
+                replicateToNode(targetNode, fileName, data);
+            } catch (Exception e) {
+                System.err.println("Failed to replicate " + fileName + " to " + targetNode + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private void replicateToNode(String targetNode, String fileName, byte[] data) {
+        int targetPort = getNodePort(targetNode);
+
+        try (Socket socket = new Socket("localhost", targetPort);
+             java.io.DataOutputStream out = new java.io.DataOutputStream(socket.getOutputStream())) {
+
+            // Mark as replication (not from client)
+            out.writeBoolean(false);
+            out.writeUTF(fileName);
+            out.writeInt(data.length);
+            out.write(data);
+            out.flush();
+
+            System.out.println("Successfully replicated " + fileName + " to " + targetNode);
+
+        } catch (IOException e) {
+            System.err.println("Failed to replicate " + fileName + " to " + targetNode + ": " + e.getMessage());
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String[] getOtherNodes() {
+        switch (nodeId) {
+            case "Node1":
+                return new String[]{"Node2", "Node3"};
+            case "Node2":
+                return new String[]{"Node1", "Node3"};
+            case "Node3":
+                return new String[]{"Node1", "Node2"};
+            default:
+                return new String[0];
+        }
+    }
+
+    private int getNodePort(String nodeId) {
+        switch (nodeId) {
+            case "Node1": return 5001;
+            case "Node2": return 5002;
+            case "Node3": return 5003;
+            default: return 9100;
+        }
+    }
+
     public static void main(String[] args) {
         String nodeId = args.length > 0 ? args[0] : "Node1";
         String storagePath = args.length > 1 ? args[1] : "storage_" + nodeId;
         String metadataHost = args.length > 2 ? args[2] : "localhost";
-        int replicationPort = args.length > 3 ? Integer.parseInt(args[3]) : Config.STORAGE_NODE_PORT;
+        int replicationPort = args.length > 3 ? Integer.parseInt(args[3]) : getDefaultPort(nodeId);
 
-        NodeManager nodeManager = NodeManagerSingleton.getInstance();
-        nodeManager.registerNode("Node1", "localhost", 5001);
-        nodeManager.registerNode("Node2", "localhost", 5002);
-        nodeManager.registerNode("Node3", "localhost", 5003);
-
-        FileManager fileManager = new FileManager(nodeManager);
-
-        StorageNode node = new StorageNode(nodeId, storagePath, fileManager, nodeManager, replicationPort);
+        StorageNode node = new StorageNode(nodeId, storagePath, replicationPort);
         node.start(metadataHost);
+    }
+
+    private static int getDefaultPort(String nodeId) {
+        switch (nodeId) {
+            case "Node1": return 5001;
+            case "Node2": return 5002;
+            case "Node3": return 5003;
+            default: return 9100;
+        }
     }
 }

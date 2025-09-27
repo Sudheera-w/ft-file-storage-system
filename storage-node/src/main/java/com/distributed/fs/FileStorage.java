@@ -1,8 +1,6 @@
 package com.distributed.fs;
 
 import java.io.*;
-import java.net.Socket;
-import java.util.List;
 
 public class FileStorage {
     private final String nodeId;
@@ -16,42 +14,13 @@ public class FileStorage {
         if (!dir.exists()) dir.mkdirs();
     }
 
-    // Store locally and optionally replicate
-    public void storeFile(String fileName, byte[] data, List<String> replicateToNodes) throws IOException {
-        // Store locally
+    // Store file locally
+    public void storeFile(String fileName, byte[] data) throws IOException {
         File file = new File(storagePath + "/" + fileName);
         try (FileOutputStream fos = new FileOutputStream(file)) {
             fos.write(data);
         }
-
-        // Replicate to other nodes if needed
-        for (String targetNode : replicateToNodes) {
-            if (!targetNode.equals(nodeId)) { // avoid sending to self
-                sendFileToNode(targetNode, fileName, data);
-            }
-        }
-    }
-
-    // Overloaded method: store locally only
-    public void storeFile(String fileName, byte[] data) throws IOException {
-        storeFile(fileName, data, List.of());
-    }
-
-    // Send file to another storage node
-    private void sendFileToNode(String targetHost, String fileName, byte[] data) {
-        try (Socket socket = new Socket(targetHost, Config.STORAGE_NODE_PORT);
-             DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
-
-            out.writeUTF(fileName);
-            out.writeInt(data.length);
-            out.write(data);
-            out.flush();
-
-            System.out.println("Replicated " + fileName + " → " + targetHost);
-
-        } catch (IOException e) {
-            System.err.println("Failed to replicate " + fileName + " to " + targetHost + ": " + e.getMessage());
-        }
+        System.out.println("Stored file " + fileName + " locally on " + nodeId);
     }
 
     public boolean fileExists(String fileName) {
