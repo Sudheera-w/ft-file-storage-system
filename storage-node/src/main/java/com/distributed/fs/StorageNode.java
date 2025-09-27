@@ -37,6 +37,8 @@ public class StorageNode {
                 while (true) {
                     Socket client = serverSocket.accept();
                     DataInputStream in = new DataInputStream(client.getInputStream());
+
+                    boolean fromClient = in.readBoolean();
                     String fileName = in.readUTF();
                     int length = in.readInt();
                     byte[] data = new byte[length];
@@ -45,7 +47,11 @@ public class StorageNode {
                     storage.storeFile(fileName, data);
                     System.out.println("Received file: " + fileName + " on node " + nodeId);
 
-                    fileManager.ensureReplication(fileName, data);
+                    // Replicate only if uploaded from client
+                    if (fromClient) {
+                        fileManager.ensureReplication(fileName, data, nodeId);
+                    }
+
                     client.close();
                 }
             } catch (IOException e) {

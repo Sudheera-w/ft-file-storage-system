@@ -42,9 +42,13 @@ public class FileManager {
         if (targetNode == null || !targetNode.isOnline()) return;
         try (Socket socket = new Socket(targetNode.getAddress(), targetNode.getPort());
              DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
+
+            // mark as replication (not from client)
+            out.writeBoolean(false);
             out.writeUTF(fileName);
             out.writeInt(data.length);
             out.write(data);
+
             System.out.println("Replicated " + fileName + " to " + targetNode.getNodeId());
             addFile(fileName, targetNode.getNodeId());
         }
@@ -64,7 +68,7 @@ public class FileManager {
                 .collect(Collectors.toList());
     }
 
-    public void ensureReplication(String fileName, byte[] fileData) {
+    public void ensureReplication(String fileName, byte[] fileData, String sourceNodeId) {
         Set<String> nodesWithFile = getNodesForFile(fileName);
         int needed = REPLICATION_FACTOR - nodesWithFile.size();
         if (needed <= 0) return;

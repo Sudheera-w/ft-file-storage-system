@@ -15,6 +15,8 @@ public class TestClient {
         try (Socket socket = new Socket("localhost", Config.NODE1_PORT);
              DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
 
+            // mark as client upload
+            out.writeBoolean(true);
             out.writeUTF(fileName);
             out.writeInt(data.length);
             out.write(data);
