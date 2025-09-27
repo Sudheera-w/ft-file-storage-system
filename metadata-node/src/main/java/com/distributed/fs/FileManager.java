@@ -31,7 +31,7 @@ public class FileManager {
     public byte[] getFileDataFromNode(NodeInfo sourceNode, String fileName) {
         System.out.println("Fetching file " + fileName + " from node " + sourceNode.getNodeId());
         if (fileMap.containsKey(fileName) && fileMap.get(fileName).contains(sourceNode.getNodeId())) {
-            return ("Dummy data for " + fileName).getBytes();
+            return ("File data for " + fileName + " from " + sourceNode.getNodeId()).getBytes();
         } else {
             System.out.println("Source node " + sourceNode.getNodeId() + " does not have file " + fileName);
             return null;
