@@ -1,1 +1,1 @@
-Hello from recovery test!
+File data for test.txt from Node1

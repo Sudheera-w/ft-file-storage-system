@@ -1,1 +1,1 @@
-Testing fault tolerance and recovery
+To test fault tolerance and recovery

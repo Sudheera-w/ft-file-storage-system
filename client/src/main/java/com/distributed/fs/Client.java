@@ -1,7 +1,0 @@
-package com.distributed.fs;
-
-public class Client {
-    public static void main(String[] args) throws Exception {
-
-    }
-}

@@ -1,1 +1,1 @@
-This file will be replicated across nodes
+Replicating file
