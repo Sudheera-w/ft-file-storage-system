@@ -14,6 +14,8 @@ public class RaftHttpServer {
     private final RaftNode node;
     private final HttpServer server;
     private final Gson gson = new Gson();
+    private final Map<String, Integer> lastLoggedAppendIndex = new HashMap<>();
+
 
     public RaftHttpServer(RaftNode node, int port) throws IOException {
         this.node = node;
@@ -40,14 +42,21 @@ public class RaftHttpServer {
         RpcModels.AppendEntriesRequest req = gson.fromJson(
                 new InputStreamReader(exchange.getRequestBody()), RpcModels.AppendEntriesRequest.class);
 
+        // Log only if new entries beyond last logged index
         if (!req.entries.isEmpty()) {
-            System.out.println("Received AppendEntries with " + req.entries.size() +
-                    " entries on " + node.getNodeId());
+            int lastIndex = req.prevLogIndex + req.entries.size();
+            int prevLogged = lastLoggedAppendIndex.getOrDefault(node.getNodeId(), 0);
+            if (lastIndex > prevLogged) {
+                System.out.println("Received AppendEntries with " + req.entries.size() +
+                        " entries on " + node.getNodeId());
+                lastLoggedAppendIndex.put(node.getNodeId(), lastIndex);
+            }
         }
 
         RpcModels.AppendEntriesResponse resp = node.onAppendEntries(req);
         sendJson(exchange, resp);
     }
+
 
 
     private void handleClientPut(HttpExchange exchange) throws IOException {
