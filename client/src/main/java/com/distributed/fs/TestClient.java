@@ -11,7 +11,7 @@ public class TestClient {
         System.out.println("** testing **");
 
         // Upload test files to demonstrate recovery mechanism
-        uploadFile("test.txt", "Hello");
+        uploadFile("testnew.txt", "Hello");
 
         System.out.println("\nAll test files uploaded successfully!");
     }
