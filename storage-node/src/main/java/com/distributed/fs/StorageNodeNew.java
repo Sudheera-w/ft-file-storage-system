@@ -5,12 +5,12 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
-public class StorageNode {
+public class StorageNodeNew {
     private final String nodeId;
     private final FileStorage storage;
     private final int replicationPort;
 
-    public StorageNode(String nodeId, String storagePath, int replicationPort) {
+    public StorageNodeNew(String nodeId, String storagePath, int replicationPort) {
         this.nodeId = nodeId;
         this.storage = new FileStorage(nodeId, storagePath);
         this.replicationPort = replicationPort;
@@ -123,7 +123,7 @@ public class StorageNode {
         String metadataHost = args.length > 2 ? args[2] : "localhost";
         int replicationPort = args.length > 3 ? Integer.parseInt(args[3]) : getDefaultPort(nodeId);
 
-        StorageNode node = new StorageNode(nodeId, storagePath, replicationPort);
+        StorageNodeNew node = new StorageNodeNew(nodeId, storagePath, replicationPort);
         node.start(metadataHost);
     }
 
