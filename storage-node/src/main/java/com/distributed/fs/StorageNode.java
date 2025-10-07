@@ -1,150 +1,212 @@
 package com.distributed.fs;
 
-import java.io.DataInputStream;
 import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
+import java.util.*;
 
 public class StorageNode {
-    private final String nodeId;
-    private final FileStorage storage;
-    private final int replicationPort;
+    private static final String[] NODE_PATHS = {
+            "storage_Node1/",
+            "storage_Node2/",
+            "storage_Node3/"
+    };
 
-    public StorageNode(String nodeId, String storagePath, int replicationPort) {
-        this.nodeId = nodeId;
-        this.storage = new FileStorage(nodeId, storagePath);
-        this.replicationPort = replicationPort;
+    private static final int QUORUM_SIZE = 2; // Minimum nodes for successful write
+    private final Map<String, Integer> fileVersions; // Track latest version per file
+
+    public StorageNode() {
+        this.fileVersions = new HashMap<>();
+        Utils.log("StorageNode initialized with " + NODE_PATHS.length + " replicas");
     }
 
-    public void start(String metadataHost) {
-        System.out.println("Storage Node " + nodeId + " started.");
+    /**
+     * Writes a file to all storage nodes with replication and versioning
+     */
+    public boolean writeFile(String fileName, String content) {
+        Utils.log("Writing file: " + fileName);
 
-        // Heartbeat (optional)
-        new Thread(new HeartbeatSender(metadataHost, Config.METADATA_NODE_PORT, nodeId)).start();
+        // Get next version number
+        int version = fileVersions.getOrDefault(fileName, 0) + 1;
+        long timestamp = Utils.getCurrentTimestamp();
 
-        // Start replication listener
-        startReplicationListener();
+        int successfulWrites = 0;
+        List<String> failedNodes = new ArrayList<>();
+
+        // Attempt to write to all nodes
+        for (String nodePath : NODE_PATHS) {
+            try {
+                String filePath = nodePath + fileName;
+                Utils.writeToFile(filePath, content, version, timestamp);
+                successfulWrites++;
+                Utils.log("  ✓ Successfully wrote to " + nodePath);
+            } catch (IOException e) {
+                failedNodes.add(nodePath);
+                Utils.log("  ✗ Failed to write to " + nodePath + ": " + e.getMessage());
+            }
+        }
+
+        // Check if quorum was achieved
+        if (successfulWrites >= QUORUM_SIZE) {
+            fileVersions.put(fileName, version);
+            Utils.log("Write successful! (Quorum: " + successfulWrites + "/" + NODE_PATHS.length + ")");
+            return true;
+        } else {
+            Utils.log("Write failed! Only " + successfulWrites + " nodes updated (quorum requires " + QUORUM_SIZE + ")");
+            // Rollback: try to delete from nodes that succeeded
+            rollbackWrite(fileName, failedNodes);
+            return false;
+        }
     }
 
-    private void startReplicationListener() {
-        new Thread(() -> {
-            try (ServerSocket serverSocket = new ServerSocket(replicationPort)) {
-                System.out.println("Node " + nodeId + " replication listener started on port " + replicationPort);
-                while (true) {
-                    Socket client = serverSocket.accept();
-                    DataInputStream in = new DataInputStream(client.getInputStream());
+    /**
+     * Reads a file from all nodes and returns the latest version
+     */
+    public String readFile(String fileName) {
+        Utils.log("Reading file: " + fileName);
 
-                    boolean fromClient = in.readBoolean();
-                    String fileName = in.readUTF();
-                    int length = in.readInt();
-                    byte[] data = new byte[length];
-                    in.readFully(data);
+        List<FileVersion> versions = new ArrayList<>();
 
-                    storage.storeFile(fileName, data);
-                    System.out.println("Received file: " + fileName + " on node " + nodeId);
+        // Read from all nodes
+        for (String nodePath : NODE_PATHS) {
+            try {
+                String filePath = nodePath + fileName;
+                FileVersion fv = Utils.readFromFile(filePath);
 
-                    // Always notify metadata node about the file (whether from client or replication)
-                    notifyMetadataNode(fileName, nodeId);
-
-                    // Replicate only if uploaded from client
-                    if (fromClient) {
-                        replicateToOtherNodes(fileName, data);
-                    }
-
-                    client.close();
+                if (fv != null) {
+                    versions.add(fv);
+                    Utils.log("  ✓ Read from " + nodePath + " - " + fv);
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                Utils.log("  ✗ Failed to read from " + nodePath + ": " + e.getMessage());
             }
-        }).start();
+        }
+
+        // Return latest version based on conflict resolution
+        if (versions.isEmpty()) {
+            Utils.log("File not found in any node");
+            return null;
+        }
+
+        FileVersion latest = resolveConflicts(versions);
+        if (latest != null) {
+            Utils.log("Returning latest version: " + latest.getVersion());
+            return latest.getContent();
+        }
+        return null;
     }
 
-    private void replicateToOtherNodes(String fileName, byte[] data) {
-        System.out.println("Starting replication of " + fileName + " from " + nodeId);
+    /**
+     * Resolves conflicts using last-write-wins strategy
+     */
+    private FileVersion resolveConflicts(List<FileVersion> versions) {
+        if (versions.isEmpty()) {
+            return null;
+        }
 
-        // Get list of other nodes to replicate to
-        String[] otherNodes = getOtherNodes();
+        // Sort and get the latest version
+        versions.sort(Collections.reverseOrder());
+        FileVersion latest = versions.getFirst();
 
-        for (String targetNode : otherNodes) {
+        // Check for conflicts (multiple versions)
+        if (versions.size() > 1) {
+            Set<Integer> uniqueVersions = new HashSet<>();
+            for (FileVersion fv : versions) {
+                uniqueVersions.add(fv.getVersion());
+            }
+
+            if (uniqueVersions.size() > 1) {
+                Utils.log("CONFLICT DETECTED: Multiple versions found");
+                Utils.log("  Using last-write-wins strategy (version " + latest.getVersion() + ")");
+
+                // Optionally, repair inconsistent nodes
+                repairInconsistentNodes(latest);
+            }
+        }
+
+        return latest;
+    }
+
+    /**
+     * Handles concurrent writes by checking version conflicts
+     */
+    public void handleConcurrentWrite(String fileName) {
+        Utils.log("Checking for concurrent write conflicts on: " + fileName);
+
+        List<FileVersion> versions = new ArrayList<>();
+
+        for (String nodePath : NODE_PATHS) {
             try {
-                replicateToNode(targetNode, fileName, data);
-            } catch (Exception e) {
-                System.err.println("Failed to replicate " + fileName + " to " + targetNode + ": " + e.getMessage());
+                String filePath = nodePath + fileName;
+                FileVersion fv = Utils.readFromFile(filePath);
+                if (fv != null) {
+                    versions.add(fv);
+                }
+            } catch (IOException e) {
+                Utils.log("  Error reading from " + nodePath);
+            }
+        }
+
+        resolveConflicts(versions);
+    }
+
+    /**
+     * Repairs inconsistent nodes by updating them to the latest version
+     */
+    private void repairInconsistentNodes(FileVersion latest) {
+        Utils.log("Repairing inconsistent nodes...");
+
+        for (String nodePath : NODE_PATHS) {
+            try {
+                String filePath = nodePath + "temp.txt"; // Use a temp filename for demo
+                FileVersion currentVersion = Utils.readFromFile(filePath);
+
+                if (currentVersion != null && currentVersion.getVersion() < latest.getVersion()) {
+                    Utils.writeToFile(filePath, latest.getContent(), latest.getVersion(), latest.getTimestamp());
+                    Utils.log("  ✓ Repaired " + nodePath);
+                }
+            } catch (IOException e) {
+                Utils.log("  ✗ Failed to repair " + nodePath);
             }
         }
     }
 
-    private void replicateToNode(String targetNode, String fileName, byte[] data) {
-        int targetPort = getNodePort(targetNode);
+    /**
+     * Rolls back a failed write by deleting from successfully written nodes
+     */
+    private void rollbackWrite(String fileName, List<String> failedNodes) {
+        Utils.log("Rolling back write for: " + fileName);
 
-        try (Socket socket = new Socket("localhost", targetPort);
-             java.io.DataOutputStream out = new java.io.DataOutputStream(socket.getOutputStream())) {
-
-            // Mark as replication (not from client)
-            out.writeBoolean(false);
-            out.writeUTF(fileName);
-            out.writeInt(data.length);
-            out.write(data);
-            out.flush();
-
-            System.out.println("Successfully replicated " + fileName + " to " + targetNode);
-
-        } catch (IOException e) {
-            System.err.println("Failed to replicate " + fileName + " to " + targetNode + ": " + e.getMessage());
-            throw new RuntimeException(e);
+        for (String nodePath : NODE_PATHS) {
+            if (!failedNodes.contains(nodePath)) {
+                try {
+                    Utils.deleteFile(nodePath + fileName);
+                    Utils.log("  ✓ Rolled back " + nodePath);
+                } catch (IOException e) {
+                    Utils.log("  ✗ Failed to rollback " + nodePath);
+                }
+            }
         }
     }
 
-    private String[] getOtherNodes() {
-        switch (nodeId) {
-            case "Node1":
-                return new String[]{"Node2", "Node3"};
-            case "Node2":
-                return new String[]{"Node1", "Node3"};
-            case "Node3":
-                return new String[]{"Node1", "Node2"};
-            default:
-                return new String[0];
-        }
-    }
+    /**
+     * Gets the status of all nodes for a given file
+     */
+    public void getFileStatus(String fileName) {
+        Utils.log("File status for: " + fileName);
 
-    private int getNodePort(String nodeId) {
-        switch (nodeId) {
-            case "Node1": return 5001;
-            case "Node2": return 5002;
-            case "Node3": return 5003;
-            default: return 9100;
-        }
-    }
+        for (String nodePath : NODE_PATHS) {
+            try {
+                String filePath = nodePath + fileName;
+                FileVersion fv = Utils.readFromFile(filePath);
 
-    public static void main(String[] args) {
-        String nodeId = args.length > 0 ? args[0] : "Node1";
-        String storagePath = args.length > 1 ? args[1] : "storage_" + nodeId;
-        String metadataHost = args.length > 2 ? args[2] : "localhost";
-        int replicationPort = args.length > 3 ? Integer.parseInt(args[3]) : getDefaultPort(nodeId);
-
-        StorageNode node = new StorageNode(nodeId, storagePath, replicationPort);
-        node.start(metadataHost);
-    }
-
-    private void notifyMetadataNode(String fileName, String nodeId) {
-        try (Socket socket = new Socket("localhost", Config.METADATA_NODE_PORT);
-             java.io.PrintWriter out = new java.io.PrintWriter(socket.getOutputStream(), true)) {
-
-            out.println(Message.FILE_UPDATE + ":" + fileName + ":" + nodeId);
-            System.out.println("Notified metadata node about file: " + fileName);
-
-        } catch (Exception e) {
-            System.out.println("Failed to notify metadata node: " + e.getMessage());
-        }
-    }
-
-    private static int getDefaultPort(String nodeId) {
-        switch (nodeId) {
-            case "Node1": return 5001;
-            case "Node2": return 5002;
-            case "Node3": return 5003;
-            default: return 9100;
+                if (fv != null) {
+                    Utils.log("  " + nodePath + ": Version " + fv.getVersion() +
+                            " (timestamp: " + fv.getTimestamp() + ")");
+                } else {
+                    Utils.log("  " + nodePath + ": File not found");
+                }
+            } catch (IOException e) {
+                Utils.log("  " + nodePath + ": Error - " + e.getMessage());
+            }
         }
     }
 }
